@@ -253,7 +253,7 @@ private struct BudgetEditor: View {
                                 // Rebuild the section ordering in the master array
                                 var newLines = budget.lines
                                 // Extract lines of this section in current order
-                                let secLines = idxs.map { budget.lines[$0] }
+                                _ = idxs.map { budget.lines[$0] }
                                 // Apply local move order
                                 let reordered = local.map { budget.lines[$0] }
                                 // Now write them back into their original positions
