@@ -17,6 +17,22 @@ struct ManageClientsSheet: View {
     @State private var contactName = ""
     @State private var phone = ""
     @State private var address = ""
+    @State private var vatNumber = ""
+    @State private var searchName = ""
+    private var filteredActive: [Client] {
+        let q = searchName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let base = store.clients.filter { $0.isActive }
+        guard !q.isEmpty else { return base }
+        return base.filter { $0.name.lowercased().contains(q) }
+    }
+
+    private var filteredInactive: [Client] {
+        let q = searchName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let base = store.clients.filter { !$0.isActive }
+        guard !q.isEmpty else { return base }
+        return base.filter { $0.name.lowercased().contains(q) }
+    }
+
 
     var body: some View {
         VStack(spacing: 0) {
@@ -38,6 +54,8 @@ struct ManageClientsSheet: View {
             HStack(spacing: 8) {
                 TextField("Client name", text: $name)
                 TextField("Contact name", text: $contactName)
+                TextField("VAT Nº", text: $vatNumber)
+                    .frame(width: 120)
                 TextField("Email", text: $email)
                 TextField("Phone", text: $phone)
                 TextField("Address", text: $address)
@@ -49,12 +67,13 @@ struct ManageClientsSheet: View {
                     store.add(Client(
                         name: nm,
                         contactName: contactName,
+                        vatNumber: vatNumber,
                         email: email,
                         phone: phone,
                         address: address,
                         notes: notes
                     ))
-                    name = ""; contactName = ""; email = ""; phone = ""; address = ""; notes = ""
+                    name = ""; contactName = ""; vatNumber = ""; email = ""; phone = ""; address = ""; notes = ""
                 }
                 .keyboardShortcut(.return)
             }
@@ -66,17 +85,18 @@ struct ManageClientsSheet: View {
 
             List {
                 Section("Active") {
-                    ForEach(store.clients.filter { $0.isActive }) { c in
+                    ForEach(filteredActive) { c in
                         ClientRow(client: c).environmentObject(store)
                     }
                 }
                 Section("Inactive") {
-                    ForEach(store.clients.filter { !$0.isActive }) { c in
+                    ForEach(filteredInactive) { c in
                         ClientRow(client: c).environmentObject(store)
                     }
                 }
             }
             .listStyle(.inset)
+            .searchable(text: $searchName, prompt: "Search clients by name")
             .environment(\.defaultMinListRowHeight, 28)
             .padding(.bottom, 8)
         }
@@ -116,6 +136,7 @@ struct ManageClientsSheet: View {
         let phoneI    = idx(["phone","telephone","tel"])
         let addressI  = idx(["address","addr"])
         let notesI    = idx(["notes","note","remarks","comment"])
+        let vatI = idx(["vat", "vat nº", "vat no", "vat number", "nif", "tax id", "taxid"])
 
         for (n, line) in lines.enumerated() where n > 0 {
             let cols = parseCSVRow(line, delimiter: delimiter)
@@ -129,6 +150,7 @@ struct ManageClientsSheet: View {
             let client = Client(
                 name:        !(nameI == nil && cols.indices.contains(0)) ? val(nameI)    : cols[0],
                 contactName:  val(contactI ?? (cols.indices.contains(1) ? 1 : nil)),
+                vatNumber:    val(vatI),
                 email:        val(emailI   ?? (cols.indices.contains(2) ? 2 : nil)),
                 phone:        val(phoneI   ?? (cols.indices.contains(3) ? 3 : nil)),
                 address:      val(addressI ?? (cols.indices.contains(4) ? 4 : nil)),
@@ -233,6 +255,13 @@ private struct ClientRow: View {
                 .frame(minWidth: 140)
                 .onSubmit { persist() }
                 .onChange(of: client.contactName) { _,_ in persist() }
+            // VAT Nº
+            TextField("VAT Nº", text: $client.vatNumber)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 120)
+                .onSubmit { persist() }
+                .onChange(of: client.vatNumber) { _,_ in persist() }
+
             
             // Email
             TextField("Email", text: $client.email)
