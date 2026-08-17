@@ -1045,6 +1045,17 @@ struct BudgetManagerView: View {
         @State private var sellText: String = ""
         @State private var buyText: String = ""
         @State private var showDeleteConfirm = false
+
+        /// Categories and explicitly linked quote lines display their wording
+        /// in the selected export language. An unlinked Misc line remains
+        /// directly editable, including after the user deliberately unlinks it.
+        private var displaysLocalizedName: Bool {
+            isReadOnly || line.kind != .misc || line.translationEntryID != nil
+        }
+
+        private var displaysLocalizedUnit: Bool {
+            isReadOnly || line.unitTranslationEntryID != nil
+        }
         
         var body: some View {
             HStack(spacing: 8) {
@@ -1055,17 +1066,12 @@ struct BudgetManagerView: View {
                 // NAME + NOTES COLUMN
                 VStack(alignment: .leading, spacing: 2) {
                     // Name
-                    if line.kind == .misc {
-                        if isReadOnly {
-                            Text(localizedBudgetLineName(line, language: language))
-                                .bold()
-                        } else {
-                            TextField("Name", text: $line.name)
-                                .textFieldStyle(.roundedBorder)
-                        }
-                    } else {
+                    if displaysLocalizedName {
                         Text(localizedBudgetLineName(line, language: language))
                             .bold()
+                    } else {
+                        TextField("Name", text: $line.name)
+                            .textFieldStyle(.roundedBorder)
                     }
                     
                     // 🔹 NEW: Notes
@@ -1082,7 +1088,7 @@ struct BudgetManagerView: View {
                     }
                 }
                 .frame(minWidth: 160, maxWidth: 220, alignment: .leading)
-                if isReadOnly {
+                if displaysLocalizedUnit {
                     Text(localizedBudgetLineUnit(line, language: language))
                         .frame(width: 60)
                 } else {
