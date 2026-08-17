@@ -13,8 +13,37 @@ import Foundation
 func localizedExportLabel(_ original: String, language: ExportLanguage) -> String {
     let trimmed = original.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return original }
-    guard language.code != "en" else { return trimmed }
     return TranslationStore.shared.translate(trimmed, to: language.code)
+}
+
+/// Resolves a user-selected Translation dictionary entry first, then uses the
+/// original text as the backwards-compatible lookup/fallback.
+func localizedExportText(
+    _ original: String,
+    translationEntryID: UUID?,
+    language: ExportLanguage
+) -> String {
+    TranslationStore.shared.resolve(
+        entryID: translationEntryID,
+        original: original,
+        to: language.code
+    )
+}
+
+func localizedBudgetLineName(_ line: BudgetLine, language: ExportLanguage) -> String {
+    localizedExportText(
+        line.name,
+        translationEntryID: line.translationEntryID,
+        language: language
+    )
+}
+
+func localizedBudgetLineUnit(_ line: BudgetLine, language: ExportLanguage) -> String {
+    localizedExportText(
+        line.unit,
+        translationEntryID: line.unitTranslationEntryID,
+        language: language
+    )
 }
 
 // MARK: - Budget section labels
@@ -41,9 +70,25 @@ func localizedSectionLabel(_ section: BudgetSection, language: ExportLanguage) -
 
 func localizedExportFooterNotes(language: ExportLanguage) -> [String] {
     let days = StudioInfoStore.shared.info.quoteValidityDays
-    let validityString = "Offer valid for \(days) day\(days == 1 ? "" : "s")."
+    let exactValidity = "Offer valid for \(days) day\(days == 1 ? "" : "s")."
+    let validityTemplate = days == 1
+        ? "Offer valid for {days} day."
+        : "Offer valid for {days} days."
+    let localizedTemplate = localizedExportLabel(validityTemplate, language: language)
+
+    // Existing dictionaries may contain the old complete 30-day sentence.
+    // Prefer the new user-editable template when present, otherwise retain the
+    // exact-string compatibility path.
+    let validityString: String
+    if localizedTemplate != validityTemplate {
+        validityString = localizedTemplate.replacingOccurrences(of: "{days}", with: String(days))
+    } else {
+        validityString = localizedExportLabel(exactValidity, language: language)
+    }
+
     return [
         localizedExportLabel("All amounts are subject to the applicable VAT rate.", language: language),
-        localizedExportLabel(validityString, language: language)
+        validityString
     ]
 }
+

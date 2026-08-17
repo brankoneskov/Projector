@@ -183,6 +183,57 @@ struct NewProjectSheet: View {
     }
 }
 
+// MARK: - Rename Project Sheet
+
+private struct RenameProjectSheet: View {
+    let currentName: String
+    let onRename: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String = ""
+    @FocusState private var nameFocused: Bool
+
+    private var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Rename Project").font(.title2).bold()
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Project name").foregroundColor(.secondary).font(.callout)
+                TextField("Name", text: $name)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($nameFocused)
+                    .onSubmit(rename)
+            }
+
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Rename", action: rename)
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(trimmedName.isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(width: 400)
+        .onAppear {
+            name = currentName
+            nameFocused = true
+        }
+    }
+
+    private func rename() {
+        guard !trimmedName.isEmpty else { return }
+        onRename(trimmedName)
+        dismiss()
+    }
+}
+
 // MARK: - Project Dashboard
 
 struct ProjectDashboardView: View {
@@ -210,6 +261,7 @@ struct ProjectDashboardView: View {
     @State private var selectedSessionID: Session.ID? = nil
     @State private var editingClient = false
     @State private var clientDraft = ""
+    @State private var showRenameProject = false
 
     enum DashTab: String, CaseIterable {
         case sessions = "Sessions"
@@ -347,13 +399,13 @@ struct ProjectDashboardView: View {
         func net(_ gross: Double) -> Double { hasDiscount ? gross * (1 - effectiveDiscountPercent / 100) : gross }
 
         if sessionsRevenue > 0 {
-            lines.append(["Sessions", esc("Studio time – \(project.name)"),
+            lines.append(["Sessions", esc("Studio time – \(currentProject.name)"),
                           fmt(totalHours), "h",
                           hasDiscount ? fmt(effectiveDiscountPercent) : "0",
                           fmt(net(sessionsRevenue))].joined(separator: ","))
         }
         if totalServiceRevenue > 0 {
-            lines.append(["Services", esc("Services – \(project.name)"),
+            lines.append(["Services", esc("Services – \(currentProject.name)"),
                           fmt(Double(totalServiceUnits)), "unit",
                           hasDiscount ? fmt(effectiveDiscountPercent) : "0",
                           fmt(net(totalServiceRevenue))].joined(separator: ","))
@@ -362,7 +414,7 @@ struct ProjectDashboardView: View {
         let panel = NSSavePanel()
         panel.canCreateDirectories = true
         panel.allowedContentTypes = [UTType.commaSeparatedText]
-        panel.nameFieldStringValue = "\(project.name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-"))-invoice.csv"
+        panel.nameFieldStringValue = "\(currentProject.name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-"))-invoice.csv"
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             try? csv.data(using: .utf8)?.write(to: url)
@@ -380,7 +432,18 @@ struct ProjectDashboardView: View {
                     HStack(spacing: 6) {
                         Text("Project").font(.caption).foregroundColor(.secondary).textCase(.uppercase)
                     }
-                    Text(currentProject.name).font(.title2).bold()
+                    HStack(spacing: 6) {
+                        Text(currentProject.name).font(.title2).bold()
+                        Button {
+                            showRenameProject = true
+                        } label: {
+                            Image(systemName: "pencil")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Rename project")
+                    }
 
                     HStack(spacing: 6) {
                         Text("Client").font(.caption).foregroundColor(.secondary).textCase(.uppercase)
@@ -603,6 +666,13 @@ struct ProjectDashboardView: View {
             .environmentObject(people)
             .environmentObject(RoomCategoryStore.shared)
             .environmentObject(PersonCategoryStore.shared)
+        }
+        .sheet(isPresented: $showRenameProject) {
+            RenameProjectSheet(currentName: currentProject.name) { newName in
+                var updated = currentProject
+                updated.name = newName
+                projects.update(updated)
+            }
         }
         .alert("Can't update", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
             Button("OK", role: .cancel) {}
@@ -928,13 +998,18 @@ private extension Array where Element == String {
 
 struct ProjectRow: View {
     @EnvironmentObject private var projects: ProjectStore
-    @State var project: Project
+    let project: Project
     @State private var showDeleteConfirm = false
     @State private var showNotes = false
+    @State private var showRenameProject = false
     @Environment(\.openWindow) private var openWindow
 
+    private var currentProject: Project {
+        projects.projects.first(where: { $0.id == project.id }) ?? project
+    }
+
     private var statusColor: Color {
-        switch project.status {
+        switch currentProject.status {
         case .active:              return .green
         case .completed:           return .blue
         case .inactive, .cancelled: return .secondary
@@ -942,25 +1017,27 @@ struct ProjectRow: View {
     }
 
     private func setStatus(_ s: ProjectStatus) {
-        var p = project; p.status = s; projects.update(p); project = p
+        var updated = currentProject
+        updated.status = s
+        projects.update(updated)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
         HStack(spacing: 12) {
-            Text(project.name).bold().frame(minWidth: 180, alignment: .leading)
+            Text(currentProject.name).bold().frame(minWidth: 180, alignment: .leading)
                 .onTapGesture(count: 2) {
                     openWindow(id: "projectDashboard", value: project.id)
                 }
 
-            Text(project.client).foregroundColor(.secondary).frame(minWidth: 160, alignment: .leading)
+            Text(currentProject.client).foregroundColor(.secondary).frame(minWidth: 160, alignment: .leading)
 
             Spacer()
 
             Button("Open…")    { openWindow(id: "projectDashboard", value: project.id) }
             Button("Budgets…") { openWindow(id: "budget", value: project.id) }
 
-            Menu(project.status.label) {
+            Menu(currentProject.status.label) {
                 Button("Set Active")    { setStatus(.active) }
                 Button("Set Completed") { setStatus(.completed) }
                 Button("Set Cancelled") { setStatus(.inactive) }
@@ -974,19 +1051,21 @@ struct ProjectRow: View {
             Button {
                 showNotes.toggle()
             } label: {
-                Image(systemName: project.notes.isEmpty ? "note.text" : "note.text.badge.plus")
-                    .foregroundColor(showNotes ? .accentColor : (project.notes.isEmpty ? .secondary : .primary))
+                Image(systemName: currentProject.notes.isEmpty ? "note.text" : "note.text.badge.plus")
+                    .foregroundColor(showNotes ? .accentColor : (currentProject.notes.isEmpty ? .secondary : .primary))
             }
             .buttonStyle(.plain)
-            .help(showNotes ? "Hide notes" : (project.notes.isEmpty ? "Add notes" : "Show notes"))
+            .help(showNotes ? "Hide notes" : (currentProject.notes.isEmpty ? "Add notes" : "Show notes"))
 
             Menu("•••") {
+                Button("Rename…") { showRenameProject = true }
+                Divider()
                 Button("Delete", role: .destructive) { showDeleteConfirm = true }
             }
         }
         .padding(.vertical, 4)
         .confirmationDialog("Delete Project?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
-            Button("Delete", role: .destructive) { projects.delete(project) }
+            Button("Delete", role: .destructive) { projects.delete(currentProject) }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Deleting is undoable. Are you sure?")
@@ -994,8 +1073,12 @@ struct ProjectRow: View {
 
         if showNotes {
             TextEditor(text: Binding(
-                get: { project.notes },
-                set: { project.notes = $0; projects.update(project) }
+                get: { currentProject.notes },
+                set: { newValue in
+                    var updated = currentProject
+                    updated.notes = newValue
+                    projects.update(updated)
+                }
             ))
             .font(.callout)
             .frame(height: 80)
@@ -1005,6 +1088,13 @@ struct ProjectRow: View {
         }
 
         } // end VStack
+        .sheet(isPresented: $showRenameProject) {
+            RenameProjectSheet(currentName: currentProject.name) { newName in
+                var updated = currentProject
+                updated.name = newName
+                projects.update(updated)
+            }
+        }
     }
 }
 

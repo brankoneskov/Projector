@@ -11,8 +11,10 @@ import Combine
 final class QuoteTemplateStore: ObservableObject {
     static let shared = QuoteTemplateStore()
 
+    private var isLoading = false
+
     @Published var templates: [QuoteTemplate] = [] {
-        didSet { save() }
+        didSet { if !isLoading { save() } }
     }
 
     private init() { load() }
@@ -24,11 +26,21 @@ final class QuoteTemplateStore: ObservableObject {
     }
 
     private func load() {
-        if let data = try? Data(contentsOf: url),
-           let decoded = try? JSONDecoder().decode([QuoteTemplate].self, from: data) {
-            templates = decoded
-        } else {
+        isLoading = true
+        defer { isLoading = false }
+
+        guard FileManager.default.fileExists(atPath: url.path) else {
             templates = []
+            return
+        }
+
+        do {
+            let data = try Data(contentsOf: url)
+            templates = try JSONDecoder().decode([QuoteTemplate].self, from: data)
+        } catch {
+            // Keep the on-disk file untouched so a transient or schema error
+            // can never replace all templates with an empty array.
+            print("⚠️ Failed to load quote templates: \(error.localizedDescription)")
         }
     }
 

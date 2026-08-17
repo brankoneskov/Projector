@@ -19,6 +19,22 @@ struct TranslationEntry: Identifiable, Codable, Hashable {
     func translation(for languageCode: String) -> String? {
         translations[languageCode]
     }
+
+    /// Resolve this user-configured entry for an export language.
+    /// English is stored in `key`; all other languages live in `translations`.
+    func resolvedText(for languageCode: String) -> String? {
+        if languageCode == "en" {
+            let english = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            return english.isEmpty ? nil : english
+        }
+
+        guard let value = translations[languageCode]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else {
+            return nil
+        }
+        return value
+    }
 }
 
 // MARK: - Store
@@ -42,10 +58,15 @@ final class TranslationStore: ObservableObject {
             do {
                 let data = try Data(contentsOf: fileURL)
                 entries = try JSONDecoder().decode([TranslationEntry].self, from: data)
+                sort()
                 print("✅ Loaded \(entries.count) translation entries")
                 return
             } catch {
                 print("⚠️ Failed to load translations: \(error.localizedDescription)")
+                // Preserve the existing file. Never replace a user's dictionary
+                // with seed data merely because one read or decode failed.
+                entries = []
+                return
             }
         }
 
@@ -70,26 +91,87 @@ final class TranslationStore: ObservableObject {
 
     /// Normalise a string for matching: trim, collapse spaces, normalise dashes.
     private func normalise(_ s: String) -> String {
-        s.trimmingCharacters(in: .whitespacesAndNewlines)
+        let punctuationNormalised = s.trimmingCharacters(in: .whitespacesAndNewlines)
          .replacingOccurrences(of: "\u{2013}", with: "-")  // en-dash → hyphen
          .replacingOccurrences(of: "\u{2014}", with: "-")  // em-dash → hyphen
          .replacingOccurrences(of: "\u{2012}", with: "-")  // figure dash → hyphen
-         .replacingOccurrences(of: "  ", with: " ")        // collapse double spaces
-         .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Collapse every run of spaces, tabs and newlines to a single space.
+        return punctuationNormalised
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    func entry(withID id: UUID?) -> TranslationEntry? {
+        guard let id else { return nil }
+        return entries.first { $0.id == id }
+    }
+
+    /// Finds a unique dictionary entry whose English key or translated value
+    /// matches the supplied text. This is only a compatibility/suggestion path;
+    /// persisted UUID links remain authoritative.
+    func entry(matching text: String) -> TranslationEntry? {
+        let candidate = normalise(text)
+        guard !candidate.isEmpty else { return nil }
+
+        let matches = entries.filter { entry in
+            if normalise(entry.key).caseInsensitiveCompare(candidate) == .orderedSame {
+                return true
+            }
+            return entry.translations.values.contains {
+                normalise($0).caseInsensitiveCompare(candidate) == .orderedSame
+            }
+        }
+
+        // Never guess when two user-defined entries contain the same wording.
+        return matches.count == 1 ? matches[0] : nil
+    }
+
+    func suggestedEntryID(for text: String) -> UUID? {
+        entry(matching: text)?.id
+    }
+
+    func hasConfiguredText(
+        entryID: UUID?,
+        original: String,
+        for languageCode: String
+    ) -> Bool {
+        let matchedEntry = entry(withID: entryID) ?? entry(matching: original)
+        return matchedEntry?.resolvedText(for: languageCode) != nil
+    }
+
+    /// UUID-first resolution used by categories, services, units and budget
+    /// lines. Missing entries or missing language values fall back unchanged.
+    func resolve(
+        entryID: UUID?,
+        original: String,
+        to languageCode: String
+    ) -> String {
+        let fallback = original.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !fallback.isEmpty else { return original }
+
+        if let entry = entry(withID: entryID) {
+            return entry.resolvedText(for: languageCode) ?? fallback
+        }
+
+        // Old data has no UUID link. A unique match across any configured
+        // language lets it keep working until the user explicitly links it.
+        if let entry = entry(matching: fallback) {
+            return entry.resolvedText(for: languageCode) ?? fallback
+        }
+
+        return fallback
     }
 
     /// Returns the translation for the given language code, or the original string if not found.
     func translate(_ original: String, to languageCode: String) -> String {
-        guard languageCode != "en" else { return original }
         let trimmed = original.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return original }
-        let normOriginal = normalise(trimmed)
 
-        // First try exact case-insensitive match, then normalised match
-        if let entry = entries.first(where: { $0.key.caseInsensitiveCompare(trimmed) == .orderedSame })
-                    ?? entries.first(where: { normalise($0.key).caseInsensitiveCompare(normOriginal) == .orderedSame }),
-           let translated = entry.translations[languageCode], !translated.isEmpty {
-            return translated
+        if let entry = entry(matching: trimmed),
+           let resolved = entry.resolvedText(for: languageCode) {
+            return resolved
         }
 
         #if DEBUG
@@ -251,6 +333,17 @@ final class TranslationStore: ObservableObject {
             // Footer notes
             "All amounts are subject to the applicable VAT rate.": "A todos os valores acresce a taxa de IVA em vigor.",
             "Offer valid for 30 days.":       "Validade da proposta 30 dias.",
+            "Offer valid for {days} day.":    "Validade da proposta {days} dia.",
+            "Offer valid for {days} days.":   "Validade da proposta {days} dias.",
+            // Common units. These are editable defaults, not hardcoded output.
+            "unit":                           "un.",
+            "h":                              "h",
+            "hour":                           "hora",
+            "day":                            "dia",
+            "minute":                         "minuto",
+            "file":                           "ficheiro",
+            "GB":                             "GB",
+            "TB":                             "TB",
         ]
         for (en, pt) in sectionLabels {
             seeded[en, default: [:]] ["pt"] = pt
@@ -269,3 +362,4 @@ final class TranslationStore: ObservableObject {
 extension ExportLanguage {
     var code: String { rawValue }  // already "en" / "pt"
 }
+

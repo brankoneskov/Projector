@@ -16,8 +16,17 @@ struct Service: Identifiable, Codable, Hashable {
     var unitCostEUR: Decimal = 0
     var notes: String = ""
 
+    // User-selected Translation dictionary links and quote placement.
+    // Optional fields preserve compatibility with existing Services/*.json.
+    var translationEntryID: UUID? = nil
+    var unitTranslationEntryID: UUID? = nil
+    var variableUnitTranslationEntryID: UUID? = nil
+    var defaultBudgetSection: BudgetSection? = nil
+
     enum CodingKeys: String, CodingKey {
         case id, name, category, unitName, variableUnitName, unitPriceEUR, unitCostEUR, notes
+        case translationEntryID, unitTranslationEntryID, variableUnitTranslationEntryID
+        case defaultBudgetSection
 
         // legacy
         case usesMinutes
@@ -31,7 +40,11 @@ struct Service: Identifiable, Codable, Hashable {
         variableUnitName: String? = nil,
         unitPriceEUR: Decimal,
         unitCostEUR: Decimal = 0,
-        notes: String = ""
+        notes: String = "",
+        translationEntryID: UUID? = nil,
+        unitTranslationEntryID: UUID? = nil,
+        variableUnitTranslationEntryID: UUID? = nil,
+        defaultBudgetSection: BudgetSection? = nil
     ) {
         self.id = id
         self.name = name
@@ -41,6 +54,10 @@ struct Service: Identifiable, Codable, Hashable {
         self.unitPriceEUR = unitPriceEUR
         self.unitCostEUR = unitCostEUR
         self.notes = notes
+        self.translationEntryID = translationEntryID
+        self.unitTranslationEntryID = unitTranslationEntryID
+        self.variableUnitTranslationEntryID = variableUnitTranslationEntryID
+        self.defaultBudgetSection = defaultBudgetSection
     }
 
     init(from decoder: Decoder) throws {
@@ -64,6 +81,10 @@ struct Service: Identifiable, Codable, Hashable {
         unitPriceEUR = try c.decode(Decimal.self, forKey: .unitPriceEUR)
         unitCostEUR = try c.decodeIfPresent(Decimal.self, forKey: .unitCostEUR) ?? 0
         notes = try c.decodeIfPresent(String.self, forKey: .notes) ?? ""
+        translationEntryID = try c.decodeIfPresent(UUID.self, forKey: .translationEntryID)
+        unitTranslationEntryID = try c.decodeIfPresent(UUID.self, forKey: .unitTranslationEntryID)
+        variableUnitTranslationEntryID = try c.decodeIfPresent(UUID.self, forKey: .variableUnitTranslationEntryID)
+        defaultBudgetSection = try c.decodeIfPresent(BudgetSection.self, forKey: .defaultBudgetSection)
     }
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -75,6 +96,10 @@ struct Service: Identifiable, Codable, Hashable {
         try c.encode(unitPriceEUR, forKey: .unitPriceEUR)
         try c.encode(unitCostEUR, forKey: .unitCostEUR)
         try c.encode(notes, forKey: .notes)
+        try c.encodeIfPresent(translationEntryID, forKey: .translationEntryID)
+        try c.encodeIfPresent(unitTranslationEntryID, forKey: .unitTranslationEntryID)
+        try c.encodeIfPresent(variableUnitTranslationEntryID, forKey: .variableUnitTranslationEntryID)
+        try c.encodeIfPresent(defaultBudgetSection, forKey: .defaultBudgetSection)
     }
 }
 

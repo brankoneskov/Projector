@@ -144,7 +144,8 @@ struct QuoteExportPageView: View {
                             ForEach(sec.lines) { line in
                                 HStack(spacing: 0) {
                                     // Item name
-                                    Text(localizedExportLabel(line.name, language: budget.exportLanguage))                              .font(.system(size: 9))
+                                    Text(localizedBudgetLineName(line, language: budget.exportLanguage))
+                                        .font(.system(size: 9))
                                         .frame(width: COL_ITEM, alignment: .leading)
 
                                     // 🔹 NEW: Notes cell (between Item and Unit)
@@ -155,11 +156,8 @@ struct QuoteExportPageView: View {
                                         .truncationMode(.tail)
                                         .frame(width: COL_NOTES, alignment: .leading)
 
-                                    // Unit
-                                    // Unit
-                                    let unitLabel = (line.unit == "unit") ? "un." : line.unit
-
-                                    Text(unitLabel)
+                                    // Unit — user-configured Translation dictionary link.
+                                    Text(localizedBudgetLineUnit(line, language: budget.exportLanguage))
                                         .font(.system(size: 9))
                                         .frame(width: COL_UNIT, alignment: .trailing)
 

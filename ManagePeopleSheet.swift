@@ -178,6 +178,9 @@ struct ManagePersonCategoriesSheet: View {
     @State private var name: String = ""
     @State private var sell: String = ""
     @State private var buy: String = ""
+    @State private var translationEntryID: UUID? = nil
+    @State private var unitTranslationEntryID: UUID? = nil
+    @State private var defaultBudgetSection: BudgetSection = .others
 
     var body: some View {
         VStack(spacing: 0) {
@@ -201,14 +204,46 @@ struct ManagePersonCategoriesSheet: View {
                         name: nm,
                         sellRatePerHour: Double(sell.replacingOccurrences(of: ",", with: ".")) ?? 0,
                         buyCostPerHour: Double(buy.replacingOccurrences(of: ",", with: ".")) ?? 0,
-                        isActive: true
+                        isActive: true,
+                        translationEntryID: translationEntryID,
+                        unitTranslationEntryID: unitTranslationEntryID,
+                        defaultBudgetSection: defaultBudgetSection
                     )
                     store.add(c)
                     name = ""; sell = ""; buy = ""
+                    translationEntryID = nil
+                    unitTranslationEntryID = nil
+                    defaultBudgetSection = .others
                 }
                 .keyboardShortcut(.return)
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
+            .controlSize(.small)
+
+            HStack(alignment: .bottom, spacing: 12) {
+                TranslationLinkPicker(
+                    title: "Name translation",
+                    sourceText: name,
+                    selection: $translationEntryID
+                )
+                TranslationLinkPicker(
+                    title: "Unit translation (h)",
+                    sourceText: "h",
+                    selection: $unitTranslationEntryID
+                )
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Default quote section")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker("", selection: $defaultBudgetSection) {
+                        ForEach(BudgetSection.allCases, id: \.self) { section in
+                            Text(section.label).tag(section)
+                        }
+                    }
+                    .labelsHidden()
+                }
+            }
+            .padding(.horizontal, 12).padding(.bottom, 8)
             .controlSize(.small)
 
             Divider()
@@ -235,6 +270,7 @@ struct ManagePersonCategoriesSheet: View {
 
 private struct PersonCategoryRow: View {
     @EnvironmentObject private var store: PersonCategoryStore
+    @ObservedObject private var translations = TranslationStore.shared
     @State var category: PersonCategory
     @State private var editingName = false
     @State private var sellText: String
@@ -278,6 +314,46 @@ private struct PersonCategoryRow: View {
                     editingName.toggle()
                     if !editingName { persist() }
                 }
+                if category.translationEntryID == nil,
+                   let suggested = translations.entry(matching: category.name) {
+                    Button("Use suggested name: \(suggested.key)") {
+                        category.translationEntryID = suggested.id
+                        persist()
+                    }
+                }
+                if category.unitTranslationEntryID == nil,
+                   let suggested = translations.entry(matching: "h") {
+                    Button("Use suggested unit: \(suggested.key)") {
+                        category.unitTranslationEntryID = suggested.id
+                        persist()
+                    }
+                }
+                Picker("Name translation", selection: Binding(
+                    get: { category.translationEntryID },
+                    set: { category.translationEntryID = $0; persist() }
+                )) {
+                    Text("Not linked").tag(nil as UUID?)
+                    ForEach(translations.entries) { entry in
+                        Text(entry.key).tag(entry.id as UUID?)
+                    }
+                }
+                Picker("Unit translation", selection: Binding(
+                    get: { category.unitTranslationEntryID },
+                    set: { category.unitTranslationEntryID = $0; persist() }
+                )) {
+                    Text("Not linked").tag(nil as UUID?)
+                    ForEach(translations.entries) { entry in
+                        Text(entry.key).tag(entry.id as UUID?)
+                    }
+                }
+                Picker("Default quote section", selection: Binding(
+                    get: { category.defaultBudgetSection ?? .others },
+                    set: { category.defaultBudgetSection = $0; persist() }
+                )) {
+                    ForEach(BudgetSection.allCases, id: \.self) { section in
+                        Text(section.label).tag(section)
+                    }
+                }
                 Divider()
                 ConfirmingDestructiveButton("Delete", title: "Delete Category", onConfirm: { store.delete(category) })
             }
@@ -292,3 +368,4 @@ private struct PersonCategoryRow: View {
         store.update(c); category = c
     }
 }
+

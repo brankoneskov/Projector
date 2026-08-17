@@ -5,30 +5,6 @@
 
 import SwiftUI
 
-// MARK: - Non-English name detection
-
-/// Returns true if the string contains characters outside the basic Latin range,
-/// suggesting it may be a non-English word (e.g. accented characters in French,
-/// German umlauts, Spanish tildes, etc.).
-/// Used to warn users that category names should be in English to support
-/// multilingual budget exports via the Translations dictionary.
-private func looksNonEnglish(_ text: String) -> Bool {
-    text.unicodeScalars.contains { scalar in
-        // Allow basic Latin, digits, common punctuation and symbols
-        // Flag anything outside this range as potentially non-English
-        !(scalar.value < 128) // outside ASCII
-    }
-}
-
-private let nonEnglishWarning = """
-Category names are used as source keys for the translation system. \
-For multilingual budget exports to work correctly, names should be in English.
-
-You can add translations for other languages in Setup → Translations.
-
-Do you want to save this name anyway?
-"""
-
 // MARK: - Person Categories Window
 
 struct ManagePersonCategoriesView: View {
@@ -38,10 +14,9 @@ struct ManagePersonCategoriesView: View {
     @State private var name: String = ""
     @State private var sellText: String = ""
     @State private var buyText: String = ""
-    @State private var showNonEnglishWarning = false
-    @State private var pendingName = ""
-    @State private var pendingSell = 0.0
-    @State private var pendingBuy  = 0.0
+    @State private var translationEntryID: UUID? = nil
+    @State private var unitTranslationEntryID: UUID? = nil
+    @State private var defaultBudgetSection: BudgetSection = .others
 
     var body: some View {
         VStack(spacing: 0) {
@@ -66,14 +41,33 @@ struct ManagePersonCategoriesView: View {
                         let sell = Double(sellText.replacingOccurrences(of: ",", with: ".")) ?? 0
                         let buy  = Double(buyText.replacingOccurrences(of: ",", with: ".")) ?? 0
                         guard !nm.isEmpty else { return }
-                        if looksNonEnglish(nm) {
-                            pendingName = nm; pendingSell = sell; pendingBuy = buy
-                            showNonEnglishWarning = true
-                        } else {
-                            addPersonCategory(name: nm, sell: sell, buy: buy)
-                        }
+                        addPersonCategory(name: nm, sell: sell, buy: buy)
                     }
                     .keyboardShortcut(.return)
+                }
+
+                HStack(alignment: .bottom, spacing: 12) {
+                    TranslationLinkPicker(
+                        title: "Name translation",
+                        sourceText: name,
+                        selection: $translationEntryID
+                    )
+                    TranslationLinkPicker(
+                        title: "Unit translation (h)",
+                        sourceText: "h",
+                        selection: $unitTranslationEntryID
+                    )
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Default quote section")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Picker("", selection: $defaultBudgetSection) {
+                            ForEach(BudgetSection.allCases, id: \.self) { section in
+                                Text(section.label).tag(section)
+                            }
+                        }
+                        .labelsHidden()
+                    }
                 }
 
                 List {
@@ -87,22 +81,30 @@ struct ManagePersonCategoriesView: View {
             }
             .padding(16)
         }
-        .alert("Non-English Category Name", isPresented: $showNonEnglishWarning) {
-            Button("Save Anyway") { addPersonCategory(name: pendingName, sell: pendingSell, buy: pendingBuy) }
-            Button("Go Back", role: .cancel) { name = pendingName }
-        } message: { Text(nonEnglishWarning) }
     }
 
     private func addPersonCategory(name nm: String, sell: Double, buy: Double) {
-        let c = PersonCategory(name: nm, sellRatePerHour: sell, buyCostPerHour: buy, isActive: true)
+        let c = PersonCategory(
+            name: nm,
+            sellRatePerHour: sell,
+            buyCostPerHour: buy,
+            isActive: true,
+            translationEntryID: translationEntryID,
+            unitTranslationEntryID: unitTranslationEntryID,
+            defaultBudgetSection: defaultBudgetSection
+        )
         store.add(c)
         name = ""; sellText = ""; buyText = ""
+        translationEntryID = nil
+        unitTranslationEntryID = nil
+        defaultBudgetSection = .others
     }
 }
 
 // Row used by ManagePersonCategoriesView (window version)
 private struct PersonCategoryRowWindow: View {
     @EnvironmentObject private var store: PersonCategoryStore
+    @ObservedObject private var translations = TranslationStore.shared
     @State var category: PersonCategory
     @State private var editingName = false
     @State private var sellText: String
@@ -145,6 +147,46 @@ private struct PersonCategoryRowWindow: View {
                 Button(editingName ? "Stop Editing Name" : "Edit Name") {
                     editingName.toggle(); if !editingName { persist() }
                 }
+                if category.translationEntryID == nil,
+                   let suggested = translations.entry(matching: category.name) {
+                    Button("Use suggested name: \(suggested.key)") {
+                        category.translationEntryID = suggested.id
+                        persist()
+                    }
+                }
+                if category.unitTranslationEntryID == nil,
+                   let suggested = translations.entry(matching: "h") {
+                    Button("Use suggested unit: \(suggested.key)") {
+                        category.unitTranslationEntryID = suggested.id
+                        persist()
+                    }
+                }
+                Picker("Name translation", selection: Binding(
+                    get: { category.translationEntryID },
+                    set: { category.translationEntryID = $0; persist() }
+                )) {
+                    Text("Not linked").tag(nil as UUID?)
+                    ForEach(translations.entries) { entry in
+                        Text(entry.key).tag(entry.id as UUID?)
+                    }
+                }
+                Picker("Unit translation", selection: Binding(
+                    get: { category.unitTranslationEntryID },
+                    set: { category.unitTranslationEntryID = $0; persist() }
+                )) {
+                    Text("Not linked").tag(nil as UUID?)
+                    ForEach(translations.entries) { entry in
+                        Text(entry.key).tag(entry.id as UUID?)
+                    }
+                }
+                Picker("Default quote section", selection: Binding(
+                    get: { category.defaultBudgetSection ?? .others },
+                    set: { category.defaultBudgetSection = $0; persist() }
+                )) {
+                    ForEach(BudgetSection.allCases, id: \.self) { section in
+                        Text(section.label).tag(section)
+                    }
+                }
                 Divider()
                 ConfirmingDestructiveButton("Delete", title: "Delete Category", onConfirm: { store.delete(category) })
             }
@@ -169,10 +211,9 @@ struct ManageRoomCategoriesSheet: View {
     @State private var name: String = ""
     @State private var sell: String = ""
     @State private var buy: String = ""
-    @State private var showNonEnglishWarning = false
-    @State private var pendingName = ""
-    @State private var pendingSell = 0.0
-    @State private var pendingBuy  = 0.0
+    @State private var translationEntryID: UUID? = nil
+    @State private var unitTranslationEntryID: UUID? = nil
+    @State private var defaultBudgetSection: BudgetSection = .others
 
     var body: some View {
         VStack(spacing: 0) {
@@ -194,16 +235,37 @@ struct ManageRoomCategoriesSheet: View {
                     guard !nm.isEmpty else { return }
                     let sv = Double(sell.replacingOccurrences(of: ",", with: ".")) ?? 0
                     let bv = Double(buy.replacingOccurrences(of: ",", with: ".")) ?? 0
-                    if looksNonEnglish(nm) {
-                        pendingName = nm; pendingSell = sv; pendingBuy = bv
-                        showNonEnglishWarning = true
-                    } else {
-                        addRoomCategory(name: nm, sell: sv, buy: bv)
-                    }
+                    addRoomCategory(name: nm, sell: sv, buy: bv)
                 }
                 .keyboardShortcut(.return)
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
+            .controlSize(.small)
+
+            HStack(alignment: .bottom, spacing: 12) {
+                TranslationLinkPicker(
+                    title: "Name translation",
+                    sourceText: name,
+                    selection: $translationEntryID
+                )
+                TranslationLinkPicker(
+                    title: "Unit translation (h)",
+                    sourceText: "h",
+                    selection: $unitTranslationEntryID
+                )
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Default quote section")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker("", selection: $defaultBudgetSection) {
+                        ForEach(BudgetSection.allCases, id: \.self) { section in
+                            Text(section.label).tag(section)
+                        }
+                    }
+                    .labelsHidden()
+                }
+            }
+            .padding(.horizontal, 12).padding(.bottom, 8)
             .controlSize(.small)
 
             Divider()
@@ -223,15 +285,22 @@ struct ManageRoomCategoriesSheet: View {
             .listStyle(.inset)
             .environment(\.defaultMinListRowHeight, 28)
         }
-        .alert("Non-English Category Name", isPresented: $showNonEnglishWarning) {
-            Button("Save Anyway") { addRoomCategory(name: pendingName, sell: pendingSell, buy: pendingBuy) }
-            Button("Go Back", role: .cancel) { name = pendingName }
-        } message: { Text(nonEnglishWarning) }
     }
 
     private func addRoomCategory(name nm: String, sell: Double, buy: Double) {
-        store.add(RoomCategory(name: nm, sellRatePerHour: sell, buyCostPerHour: buy, isActive: true))
+        store.add(RoomCategory(
+            name: nm,
+            sellRatePerHour: sell,
+            buyCostPerHour: buy,
+            isActive: true,
+            translationEntryID: translationEntryID,
+            unitTranslationEntryID: unitTranslationEntryID,
+            defaultBudgetSection: defaultBudgetSection
+        ))
         name = ""; self.sell = ""; self.buy = ""
+        translationEntryID = nil
+        unitTranslationEntryID = nil
+        defaultBudgetSection = .others
     }
 }
 
@@ -244,10 +313,9 @@ struct ManageRoomCategoriesView: View {
     @State private var name: String = ""
     @State private var sellText: String = ""
     @State private var buyText: String = ""
-    @State private var showNonEnglishWarning = false
-    @State private var pendingName = ""
-    @State private var pendingSell = 0.0
-    @State private var pendingBuy  = 0.0
+    @State private var translationEntryID: UUID? = nil
+    @State private var unitTranslationEntryID: UUID? = nil
+    @State private var defaultBudgetSection: BudgetSection = .others
 
     var body: some View {
         VStack(spacing: 0) {
@@ -271,16 +339,36 @@ struct ManageRoomCategoriesView: View {
                     guard !nm.isEmpty else { return }
                     let sell = Double(sellText.replacingOccurrences(of: ",", with: ".")) ?? 0
                     let buy  = Double(buyText.replacingOccurrences(of: ",", with: ".")) ?? 0
-                    if looksNonEnglish(nm) {
-                        pendingName = nm; pendingSell = sell; pendingBuy = buy
-                        showNonEnglishWarning = true
-                    } else {
-                        addRoomCat(name: nm, sell: sell, buy: buy)
-                    }
+                    addRoomCat(name: nm, sell: sell, buy: buy)
                 }
                 .keyboardShortcut(.return)
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
+
+            HStack(alignment: .bottom, spacing: 12) {
+                TranslationLinkPicker(
+                    title: "Name translation",
+                    sourceText: name,
+                    selection: $translationEntryID
+                )
+                TranslationLinkPicker(
+                    title: "Unit translation (h)",
+                    sourceText: "h",
+                    selection: $unitTranslationEntryID
+                )
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Default quote section")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker("", selection: $defaultBudgetSection) {
+                        ForEach(BudgetSection.allCases, id: \.self) { section in
+                            Text(section.label).tag(section)
+                        }
+                    }
+                    .labelsHidden()
+                }
+            }
+            .padding(.horizontal, 12).padding(.bottom, 8)
 
             Divider()
 
@@ -296,16 +384,23 @@ struct ManageRoomCategoriesView: View {
             .environment(\.defaultMinListRowHeight, 28)
             .padding(.bottom, 8)
         }
-        .frame(minWidth: 620, minHeight: 420)
-        .alert("Non-English Category Name", isPresented: $showNonEnglishWarning) {
-            Button("Save Anyway") { addRoomCat(name: pendingName, sell: pendingSell, buy: pendingBuy) }
-            Button("Go Back", role: .cancel) { name = pendingName }
-        } message: { Text(nonEnglishWarning) }
+        .frame(minWidth: 760, minHeight: 460)
     }
 
     private func addRoomCat(name nm: String, sell: Double, buy: Double) {
-        roomCategoryStore.add(RoomCategory(name: nm, sellRatePerHour: sell, buyCostPerHour: buy, isActive: true))
+        roomCategoryStore.add(RoomCategory(
+            name: nm,
+            sellRatePerHour: sell,
+            buyCostPerHour: buy,
+            isActive: true,
+            translationEntryID: translationEntryID,
+            unitTranslationEntryID: unitTranslationEntryID,
+            defaultBudgetSection: defaultBudgetSection
+        ))
         name = ""; sellText = ""; buyText = ""
+        translationEntryID = nil
+        unitTranslationEntryID = nil
+        defaultBudgetSection = .others
     }
 }
 
@@ -313,6 +408,7 @@ struct ManageRoomCategoriesView: View {
 
 private struct RoomCategoryRow: View {
     @EnvironmentObject private var roomCategoryStore: RoomCategoryStore
+    @ObservedObject private var translations = TranslationStore.shared
     @State var category: RoomCategory
     @State private var editingName = false
     @State private var sellText: String
@@ -359,6 +455,46 @@ private struct RoomCategoryRow: View {
                 Button(editingName ? "Stop Editing Name" : "Edit Name") {
                     editingName.toggle(); if !editingName { persist() }
                 }
+                if category.translationEntryID == nil,
+                   let suggested = translations.entry(matching: category.name) {
+                    Button("Use suggested name: \(suggested.key)") {
+                        category.translationEntryID = suggested.id
+                        persist()
+                    }
+                }
+                if category.unitTranslationEntryID == nil,
+                   let suggested = translations.entry(matching: "h") {
+                    Button("Use suggested unit: \(suggested.key)") {
+                        category.unitTranslationEntryID = suggested.id
+                        persist()
+                    }
+                }
+                Picker("Name translation", selection: Binding(
+                    get: { category.translationEntryID },
+                    set: { category.translationEntryID = $0; persist() }
+                )) {
+                    Text("Not linked").tag(nil as UUID?)
+                    ForEach(translations.entries) { entry in
+                        Text(entry.key).tag(entry.id as UUID?)
+                    }
+                }
+                Picker("Unit translation", selection: Binding(
+                    get: { category.unitTranslationEntryID },
+                    set: { category.unitTranslationEntryID = $0; persist() }
+                )) {
+                    Text("Not linked").tag(nil as UUID?)
+                    ForEach(translations.entries) { entry in
+                        Text(entry.key).tag(entry.id as UUID?)
+                    }
+                }
+                Picker("Default quote section", selection: Binding(
+                    get: { category.defaultBudgetSection ?? .others },
+                    set: { category.defaultBudgetSection = $0; persist() }
+                )) {
+                    ForEach(BudgetSection.allCases, id: \.self) { section in
+                        Text(section.label).tag(section)
+                    }
+                }
                 Divider()
                 Button("Delete", role: .destructive) { showDeleteConfirm = true }
             }
@@ -379,3 +515,4 @@ private struct RoomCategoryRow: View {
         roomCategoryStore.update(category)
     }
 }
+

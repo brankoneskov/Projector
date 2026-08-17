@@ -14,6 +14,12 @@ struct RoomCategory: Identifiable, Codable, Hashable {
     var sellRatePerHour: Double = 0
     var buyCostPerHour: Double = 0
     var isActive: Bool = true
+
+    // User-selected links into TranslationStore. Optional keeps all existing
+    // RoomCategories/*.json records backwards compatible.
+    var translationEntryID: UUID? = nil
+    var unitTranslationEntryID: UUID? = nil
+    var defaultBudgetSection: BudgetSection? = nil
 }
 
 // MARK: - PersonCategory
@@ -24,6 +30,12 @@ struct PersonCategory: Identifiable, Codable, Hashable {
     var sellRatePerHour: Double = 0
     var buyCostPerHour: Double = 0
     var isActive: Bool = true
+
+    // User-selected links into TranslationStore. Optional keeps all existing
+    // PersonCategories/*.json records backwards compatible.
+    var translationEntryID: UUID? = nil
+    var unitTranslationEntryID: UUID? = nil
+    var defaultBudgetSection: BudgetSection? = nil
 }
 
 // MARK: - RoomCategoryStore
@@ -249,3 +261,4 @@ final class PersonCategoryStore: ObservableObject {
         }
     }
 }
+

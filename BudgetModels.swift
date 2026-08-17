@@ -58,9 +58,11 @@ struct BudgetLine: Identifiable, Codable, Hashable {
     var name: String                // e.g. "TV Mix" or "ADR Mixer" or "Misc fee"
     var categoryID: UUID? = nil     // when kind is roomCategory / personCategory
     var linkedServiceID: UUID? = nil   // optional pointer to a catalog Service
+    var translationEntryID: UUID? = nil
 
     // Quantity + pricing (snapshotted at creation time)
     var unit: String = "h"          // hours by default; can be "day", "flat", etc.
+    var unitTranslationEntryID: UUID? = nil
     var quantity: Double = 0        // e.g. 8.0 hours, 3.0 days
     var rateSell: Double = 0        // €/unit (sell)
     var rateBuy: Double = 0         // €/unit (cost)
@@ -79,17 +81,15 @@ struct BudgetLine: Identifiable, Codable, Hashable {
         var line = BudgetLine(kind: .roomCategory,
                               name: c.name,
                               categoryID: c.id,
+                              translationEntryID: c.translationEntryID,
                               unit: "h",
+                              unitTranslationEntryID: c.unitTranslationEntryID,
                               quantity: hours,
                               rateSell: c.sellRatePerHour,
                               rateBuy:  c.buyCostPerHour,
                               isActive: true,
                               notes: "")
-        // Choose a default section by name heuristics (adjust if desired)
-        let n = c.name.lowercased()
-        if n.contains("mix") { line.section = .soundMixing }
-        else if n.contains("edit") { line.section = .soundEditing }
-        else { line.section = .others }
+        line.section = c.defaultBudgetSection ?? .others
         return line
     }
 
@@ -97,16 +97,15 @@ struct BudgetLine: Identifiable, Codable, Hashable {
         var line = BudgetLine(kind: .personCategory,
                               name: c.name,
                               categoryID: c.id,
+                              translationEntryID: c.translationEntryID,
                               unit: "h",
+                              unitTranslationEntryID: c.unitTranslationEntryID,
                               quantity: hours,
                               rateSell: c.sellRatePerHour,
                               rateBuy:  c.buyCostPerHour,
                               isActive: true,
                               notes: "")
-        let n = c.name.lowercased()
-        if n.contains("editor") || n.contains("edit") { line.section = .pictureEditing }
-        else if n.contains("mixer") || n.contains("mix") { line.section = .soundMixing }
-        else { line.section = .others }
+        line.section = c.defaultBudgetSection ?? .others
         return line
     }
 }
@@ -591,14 +590,17 @@ extension BudgetLine {
             name: s.name,
             categoryID: nil,
             linkedServiceID: s.id,
+            translationEntryID: s.translationEntryID,
             unit: s.unitName,
+            unitTranslationEntryID: s.unitTranslationEntryID,
             quantity: quantity,
             rateSell: NSDecimalNumber(decimal: s.unitPriceEUR).doubleValue, // ← convert
             rateBuy: 0,
             isActive: true,
             notes: s.notes
         )
-        line.section = BudgetSection.others   // ← fully qualify
+        line.section = s.defaultBudgetSection ?? .others
         return line
     }
 }
+

@@ -11,6 +11,54 @@ import SwiftUI
 // Non-English languages available for translation
 private let translationLanguages: [ExportLanguage] = ExportLanguage.allCases.filter { $0 != .english }
 
+/// Reusable, user-controlled link from a category/service/unit to one entry in
+/// the Translation dictionary. The app may suggest an exact unique match, but
+/// never selects it without the user's action.
+struct TranslationLinkPicker: View {
+    @ObservedObject private var store = TranslationStore.shared
+
+    let title: String
+    let sourceText: String
+    @Binding var selection: UUID?
+
+    private var sortedEntries: [TranslationEntry] {
+        store.entries.sorted {
+            $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending
+        }
+    }
+
+    private var suggestedEntry: TranslationEntry? {
+        guard selection == nil else { return nil }
+        return store.entry(matching: sourceText)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 6) {
+                Picker("", selection: $selection) {
+                    Text("Not linked — export as entered").tag(nil as UUID?)
+                    ForEach(sortedEntries) { entry in
+                        Text(entry.key).tag(entry.id as UUID?)
+                    }
+                }
+                .labelsHidden()
+
+                if let suggestedEntry {
+                    Button("Use \(suggestedEntry.key)") {
+                        selection = suggestedEntry.id
+                    }
+                    .controlSize(.small)
+                    .help("Accept the unique dictionary match suggested by Projector")
+                }
+            }
+        }
+    }
+}
+
 struct TranslationsView: View {
     @ObservedObject private var store = TranslationStore.shared
     @Environment(\.dismiss) private var dismiss
@@ -38,6 +86,8 @@ struct TranslationsView: View {
                     Text("Translations").font(.title2).bold()
                     Text("\(store.entries.count) entries · English → \(translationLanguages.map { $0.fullName }.joined(separator: ", "))")
                         .font(.callout).foregroundColor(.secondary)
+                    Text("Categories, services and units link to entries by identity, so editing the wording does not break their links.")
+                        .font(.caption).foregroundColor(.secondary)
                 }
                 Spacer()
                 Button("Done") { dismiss() }
@@ -250,9 +300,10 @@ private struct TranslationRow: View {
                     Button("Delete", role: .destructive) { store.delete(entry) }
                     Button("Cancel", role: .cancel) {}
                 } message: {
-                    Text("\"\(entry.key)\" will be removed from translations.")
+                    Text("\"\(entry.key)\" will be removed. Linked categories, services, units and quote lines will remain valid but export their original text until another entry is selected.")
                 }
             }
         }
     }
 }
+

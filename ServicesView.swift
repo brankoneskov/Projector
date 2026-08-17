@@ -6,11 +6,6 @@
 //
 
 import SwiftUI
-
-// MARK: - Non-English name detection (mirrors CategoryManagerViews)
-private func looksNonEnglish(_ text: String) -> Bool {
-    text.unicodeScalars.contains { $0.value >= 128 }
-}
 import UniformTypeIdentifiers // Added to support UTType.text used in onDrop
 // Currency formatters that work for both Double and Decimal
 private func formatEUR(_ value: Double) -> String {
@@ -256,8 +251,6 @@ private struct ServiceEditor: View {
     @State var service: Service
     var onDone: () -> Void = {}
 
-    @State private var showNonEnglishWarning = false
-
     private var suggestedCategories: [String] {
         let raw = services.services.compactMap { $0.category?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -320,12 +313,48 @@ private struct ServiceEditor: View {
                 Divider()
 
                 VStack(alignment: .leading, spacing: 10) {
+                    EditorSectionTitle(text: "Quote & Translation")
+
+                    Text("Names may be entered in any language. Link them to your user-configured Translation dictionary for multilingual quotes.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    TranslationLinkPicker(
+                        title: "Service name translation",
+                        sourceText: service.name,
+                        selection: $service.translationEntryID
+                    )
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Default quote section")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Picker("", selection: Binding(
+                            get: { service.defaultBudgetSection ?? .others },
+                            set: { service.defaultBudgetSection = $0 }
+                        )) {
+                            ForEach(BudgetSection.allCases, id: \.self) { section in
+                                Text(section.label).tag(section)
+                            }
+                        }
+                        .labelsHidden()
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 10) {
                     EditorSectionTitle(text: "Pricing")
 
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Unit name")
                             .foregroundStyle(.secondary)
                         TextField("e.g. pass, encode, file, master", text: $service.unitName)
+                        TranslationLinkPicker(
+                            title: "Unit translation",
+                            sourceText: service.unitName,
+                            selection: $service.unitTranslationEntryID
+                        )
                     }
 
                     VStack(alignment: .leading, spacing: 6) {
@@ -338,9 +367,20 @@ private struct ServiceEditor: View {
                                 set: {
                                     let trimmed = $0.trimmingCharacters(in: .whitespacesAndNewlines)
                                     service.variableUnitName = trimmed.isEmpty ? nil : trimmed
+                                    if trimmed.isEmpty {
+                                        service.variableUnitTranslationEntryID = nil
+                                    }
                                 }
                             )
                         )
+
+                        if service.variableUnitName != nil {
+                            TranslationLinkPicker(
+                                title: "Variable unit translation",
+                                sourceText: service.variableUnitName ?? "",
+                                selection: $service.variableUnitTranslationEntryID
+                            )
+                        }
                     }
 
                     VStack(alignment: .leading, spacing: 10) {
@@ -386,28 +426,12 @@ private struct ServiceEditor: View {
         .navigationTitle(service.name.isEmpty ? "New Service" : service.name)
         .toolbar {
             Button("Save") {
-                let nm = service.name.trimmingCharacters(in: .whitespacesAndNewlines)
-                if looksNonEnglish(nm) {
-                    showNonEnglishWarning = true
-                } else {
-                    services.upsert(service)
-                    onDone()
-                }
+                service.name = service.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !service.name.isEmpty else { return }
+                services.upsert(service)
+                onDone()
             }
             .keyboardShortcut(.defaultAction)
-        }
-        .alert("Non-English Service Name", isPresented: $showNonEnglishWarning) {
-            Button("Save Anyway") { services.upsert(service); onDone() }
-            Button("Go Back", role: .cancel) {}
-        } message: {
-            Text("""
-                Service names are used as source keys for the translation system. \
-                For multilingual budget exports to work correctly, names should be in English.
-
-                You can add translations for other languages in Setup → Translations.
-
-                Do you want to save this name anyway?
-                """)
         }
         .onDisappear {
             guard services.services.contains(where: { $0.id == service.id }) else { return }
@@ -804,3 +828,4 @@ struct ServicesLaneHost: View {
         .padding()
     }
 }
+

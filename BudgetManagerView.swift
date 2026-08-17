@@ -538,6 +538,7 @@ struct BudgetManagerView: View {
         @EnvironmentObject private var budgets: BudgetStore
         @EnvironmentObject private var roomCats: RoomCategoryStore
         @EnvironmentObject private var personCats: PersonCategoryStore
+        @ObservedObject private var translations = TranslationStore.shared
         
         @State var budget: ProjectBudget
         let isReadOnly: Bool
@@ -561,6 +562,22 @@ struct BudgetManagerView: View {
         // Optional: subtotal per section (active lines only)
         private func sectionSubtotal(_ sec: BudgetSection) -> Double {
             budget.lines.filter { $0.section == sec && $0.isActive }.reduce(0) { $0 + $1.amountSell }
+        }
+
+        private var translationIssueCount: Int {
+            budget.lines.filter { $0.isActive }.reduce(0) { count, line in
+                let nameMissing = !translations.hasConfiguredText(
+                    entryID: line.translationEntryID,
+                    original: line.name,
+                    for: budget.exportLanguage.code
+                )
+                let unitMissing = !translations.hasConfiguredText(
+                    entryID: line.unitTranslationEntryID,
+                    original: line.unit,
+                    for: budget.exportLanguage.code
+                )
+                return count + (nameMissing ? 1 : 0) + (unitMissing ? 1 : 0)
+            }
         }
         
         var body: some View {
@@ -749,6 +766,16 @@ struct BudgetManagerView: View {
                         }
                     }
                     .disabled(isReadOnly)
+
+                    if translationIssueCount > 0 {
+                        Label(
+                            "\(translationIssueCount) unlinked or missing name/unit translation\(translationIssueCount == 1 ? "" : "s") — exported as entered",
+                            systemImage: "exclamationmark.triangle"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .help("Use the item menu to link its name and unit to your Translation dictionary.")
+                    }
 
                 }
                 .padding(.vertical, 4)
@@ -962,28 +989,32 @@ struct BudgetManagerView: View {
         var addMisc: () -> Void
         var addService: (Service) -> Void
 
-        private func t(_ s: String) -> String {
-            localizedExportLabel(s, language: language)
+        private func t(_ s: String, translationEntryID: UUID? = nil) -> String {
+            localizedExportText(
+                s,
+                translationEntryID: translationEntryID,
+                language: language
+            )
         }
 
         var body: some View {
             Menu {
                 Section("Room Categories") {
                     ForEach(roomCats.categories.filter { $0.isActive }.sorted { $0.name < $1.name }) { c in
-                        Button(t(c.name)) { addRoom(c) }
+                        Button(t(c.name, translationEntryID: c.translationEntryID)) { addRoom(c) }
                     }
                 }
 
                 Section("Person Categories") {
                     ForEach(personCats.categories.filter { $0.isActive }.sorted { $0.name < $1.name }) { c in
-                        Button(t(c.name)) { addPerson(c) }
+                        Button(t(c.name, translationEntryID: c.translationEntryID)) { addPerson(c) }
                     }
                 }
 
                 if !services.services.isEmpty {
                     Section("Services") {
                         ForEach(services.services.sorted { $0.name < $1.name }) { s in
-                            Button("\(t(s.name)) — \(s.unitName) @ €\((NSDecimalNumber(decimal: s.unitPriceEUR).doubleValue), specifier: "%.2f")") {
+                            Button("\(t(s.name, translationEntryID: s.translationEntryID)) — \(t(s.unitName, translationEntryID: s.unitTranslationEntryID)) @ €\((NSDecimalNumber(decimal: s.unitPriceEUR).doubleValue), specifier: "%.2f")") {
                                 addService(s)
                             }
                         }
@@ -1001,6 +1032,7 @@ struct BudgetManagerView: View {
     
     // MARK: - Line Row
     private struct BudgetLineRow: View {
+        @ObservedObject private var translations = TranslationStore.shared
         @Binding var line: BudgetLine
         let discountPercent: Double
         let isReadOnly: Bool
@@ -1025,14 +1057,14 @@ struct BudgetManagerView: View {
                     // Name
                     if line.kind == .misc {
                         if isReadOnly {
-                            Text(line.name)
+                            Text(localizedBudgetLineName(line, language: language))
                                 .bold()
                         } else {
                             TextField("Name", text: $line.name)
                                 .textFieldStyle(.roundedBorder)
                         }
                     } else {
-                        Text(localizedExportLabel(line.name, language: language))
+                        Text(localizedBudgetLineName(line, language: language))
                             .bold()
                     }
                     
@@ -1050,10 +1082,14 @@ struct BudgetManagerView: View {
                     }
                 }
                 .frame(minWidth: 160, maxWidth: 220, alignment: .leading)
-                TextField("Unit", text: $line.unit)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 60)
-                    .disabled(isReadOnly)
+                if isReadOnly {
+                    Text(localizedBudgetLineUnit(line, language: language))
+                        .frame(width: 60)
+                } else {
+                    TextField("Unit", text: $line.unit)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 60)
+                }
                 
                 TextField("Qty", text: Binding(
                     get: { qtyText },
@@ -1100,6 +1136,34 @@ struct BudgetManagerView: View {
                 
                 Menu("•••") {
                     Button("Duplicate") { onDuplicate() }.disabled(isReadOnly)
+                    if !isReadOnly,
+                       line.translationEntryID == nil,
+                       let suggested = translations.entry(matching: line.name) {
+                        Button("Use suggested name: \(suggested.key)") {
+                            line.translationEntryID = suggested.id
+                        }
+                    }
+                    if !isReadOnly,
+                       line.unitTranslationEntryID == nil,
+                       let suggested = translations.entry(matching: line.unit) {
+                        Button("Use suggested unit: \(suggested.key)") {
+                            line.unitTranslationEntryID = suggested.id
+                        }
+                    }
+                    Picker("Name translation", selection: $line.translationEntryID) {
+                        Text("Not linked").tag(nil as UUID?)
+                        ForEach(translations.entries) { entry in
+                            Text(entry.key).tag(entry.id as UUID?)
+                        }
+                    }
+                    .disabled(isReadOnly)
+                    Picker("Unit translation", selection: $line.unitTranslationEntryID) {
+                        Text("Not linked").tag(nil as UUID?)
+                        ForEach(translations.entries) { entry in
+                            Text(entry.key).tag(entry.id as UUID?)
+                        }
+                    }
+                    .disabled(isReadOnly)
                     Menu("Move to") {
                         ForEach(BudgetSection.allCases, id: \.self) { sec in
                             Button {
@@ -1219,3 +1283,4 @@ struct BudgetManagerView: View {
         showFinalizeQuoteSheet = false
     }
 }
+
